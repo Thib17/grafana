@@ -45,6 +45,10 @@ type AlertmanagerNotifier struct {
 	log log.Logger
 }
 
+func (this *AlertmanagerNotifier) ShouldNotify(evalContext *alerting.EvalContext) bool {
+	return true
+}
+
 func (this *AlertmanagerNotifier) Notify(evalContext *alerting.EvalContext) error {
 	this.log.Info("Sending alertmanager")
 
