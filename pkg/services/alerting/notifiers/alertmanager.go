@@ -1,6 +1,8 @@
 package notifiers
 
 import (
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/grafana/grafana/pkg/bus"
@@ -52,36 +54,27 @@ func (this *AlertmanagerNotifier) ShouldNotify(evalContext *alerting.EvalContext
 func (this *AlertmanagerNotifier) Notify(evalContext *alerting.EvalContext) error {
 	this.log.Info("Sending alertmanager")
 
-	alerts := make([]interface{}, 0)
-	for _, match := range evalContext.EvalMatches {
-		alertJSON := simplejson.New()
-		alertJSON.Set("startsAt", evalContext.StartTime.UTC().Format(time.RFC3339))
-		if evalContext.Rule.State == m.AlertStateAlerting {
-			alertJSON.Set("endsAt", "0001-01-01T00:00:00Z")
-		} else {
-			alertJSON.Set("endsAt", evalContext.EndTime.UTC().Format(time.RFC3339))
-		}
-
-		ruleUrl, err := evalContext.GetRuleUrl()
-		if err == nil {
-			alertJSON.Set("generatorURL", ruleUrl)
-		}
-
-		if evalContext.Rule.Message != "" {
-			alertJSON.SetPath([]string{"annotations", "description"}, evalContext.Rule.Message)
-		}
-
-		tags := make(map[string]string)
-		for k, v := range match.Tags {
-			tags[k] = v
-		}
-		tags["alertname"] = evalContext.Rule.Name
-		alertJSON.Set("labels", tags)
-
-		alerts = append(alerts, alertJSON)
+	// We can't define an alert per evalMatch since we wouldn't be able to send resolve.
+	// Indeed evalContext.evalMatches is empty when state is OK.
+	// Therefore we define only one alert for the evalContext.Rule
+	alertJSON := simplejson.New()
+	alertJSON.Set("startsAt", evalContext.StartTime.UTC().Format(time.RFC3339))
+	if evalContext.Rule.State == m.AlertStateAlerting {
+		alertJSON.Set("endsAt", "0001-01-01T00:00:00Z")
+	} else {
+		alertJSON.Set("endsAt", evalContext.EndTime.UTC().Format(time.RFC3339))
 	}
 
-	bodyJSON := simplejson.NewFromAny(alerts)
+	ruleURL, err := evalContext.GetRuleUrl()
+	if err == nil {
+		alertJSON.Set("generatorURL", ruleURL)
+	}
+
+	alertJSON.Set("annotations", parseAnnotations(evalContext))
+	alertJSON.Set("labels", parseLabels(evalContext.Rule))
+
+	// Alertmanager requires a JsonArray
+	bodyJSON := simplejson.NewFromAny([]*simplejson.Json{alertJSON})
 	body, _ := bodyJSON.MarshalJSON()
 
 	cmd := &m.SendWebhookSync{
@@ -96,4 +89,40 @@ func (this *AlertmanagerNotifier) Notify(evalContext *alerting.EvalContext) erro
 	}
 
 	return nil
+}
+
+func parseAnnotations(evalContext *alerting.EvalContext) map[string]string {
+	annotations := make(map[string]string)
+
+	if evalContext.Rule.Message != "" {
+		annotations["description"] = evalContext.Rule.Message
+	}
+
+	formattedMatches := ""
+	for _, evalMatch := range evalContext.EvalMatches {
+		formattedMatches = formattedMatches + evalMatch.Metric + " : " + evalMatch.Value.String() + "\n"
+	}
+	if formattedMatches != "" {
+		annotations["evalMatches"] = formattedMatches
+	}
+
+	return annotations
+}
+
+func parseLabels(rule *alerting.Rule) map[string]string {
+	labels := make(map[string]string)
+	labels["alertname"] = rule.Name
+
+	if rule.Message != "" {
+		re := regexp.MustCompile("\"(.+)\":\"(.+)\"")
+		for _, line := range strings.Split(rule.Message, "\n") {
+			match := re.FindAllStringSubmatch(line, 1)
+			if match != nil {
+				labelName := match[0][1]
+				labelValue := match[0][2]
+				labels[labelName] = labelValue
+			}
+		}
+	}
+	return labels
 }
