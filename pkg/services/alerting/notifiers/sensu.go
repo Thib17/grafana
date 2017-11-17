@@ -71,6 +71,10 @@ type SensuNotifier struct {
 	log      log.Logger
 }
 
+func (this *SensuNotifier) ShouldNotify(context *alerting.EvalContext) bool {
+	return DefaultShouldNotify(context)
+}
+
 func (this *SensuNotifier) Notify(evalContext *alerting.EvalContext) error {
 	this.log.Info("Sending sensu result")
 

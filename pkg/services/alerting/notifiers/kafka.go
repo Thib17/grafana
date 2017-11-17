@@ -57,6 +57,10 @@ type KafkaNotifier struct {
 	log      log.Logger
 }
 
+func (this *KafkaNotifier) ShouldNotify(context *alerting.EvalContext) bool {
+	return DefaultShouldNotify(context)
+}
+
 func (this *KafkaNotifier) Notify(evalContext *alerting.EvalContext) error {
 
 	state := evalContext.Rule.State

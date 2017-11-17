@@ -62,6 +62,10 @@ type OpsGenieNotifier struct {
 	log       log.Logger
 }
 
+func (this *OpsGenieNotifier) ShouldNotify(context *alerting.EvalContext) bool {
+	return DefaultShouldNotify(context)
+}
+
 func (this *OpsGenieNotifier) Notify(evalContext *alerting.EvalContext) error {
 
 	var err error
