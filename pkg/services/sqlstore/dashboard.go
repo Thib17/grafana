@@ -197,7 +197,7 @@ func SearchDashboards(query *search.FindPersistedDashboardsQuery) error {
 		params = append(params, "%"+query.Title+"%")
 	}
 
-	sql.WriteString(fmt.Sprintf(" ORDER BY dashboard.title ASC LIMIT 1000"))
+	sql.WriteString(fmt.Sprintf(" ORDER BY dashboard.title ASC LIMIT 10000"))
 
 	var res []DashboardSearchProjection
 
