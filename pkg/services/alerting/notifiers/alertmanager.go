@@ -54,27 +54,29 @@ func (this *AlertmanagerNotifier) ShouldNotify(evalContext *alerting.EvalContext
 func (this *AlertmanagerNotifier) Notify(evalContext *alerting.EvalContext) error {
 	this.log.Info("Sending alertmanager")
 
-	// We can't define an alert per evalMatch since we wouldn't be able to send resolve.
-	// Indeed evalContext.evalMatches is empty when state is OK.
-	// Therefore we define only one alert for the evalContext.Rule
-	alertJSON := simplejson.New()
-	alertJSON.Set("startsAt", evalContext.StartTime.UTC().Format(time.RFC3339))
-	if evalContext.Rule.State == m.AlertStateAlerting {
-		alertJSON.Set("endsAt", "0001-01-01T00:00:00Z")
-	} else {
-		alertJSON.Set("endsAt", evalContext.EndTime.UTC().Format(time.RFC3339))
-	}
+	alerts := make([]interface{}, 0)
+	for _, match := range evalContext.EvalMatches {
+		alertJSON := simplejson.New()
+		alertJSON.Set("startsAt", evalContext.StartTime.UTC().Format(time.RFC3339))
+		if evalContext.Rule.State == m.AlertStateAlerting {
+			alertJSON.Set("endsAt", "0001-01-01T00:00:00Z")
+		} else {
+			alertJSON.Set("endsAt", evalContext.EndTime.UTC().Format(time.RFC3339))
+		}
 
-	ruleURL, err := evalContext.GetRuleUrl()
-	if err == nil {
-		alertJSON.Set("generatorURL", ruleURL)
-	}
+		ruleURL, err := evalContext.GetRuleUrl()
+		if err == nil {
+			alertJSON.Set("generatorURL", ruleURL)
+		}
 
-	alertJSON.Set("annotations", parseAnnotations(evalContext))
-	alertJSON.Set("labels", parseLabels(evalContext.Rule))
+		alertJSON.Set("annotations", parseAnnotations(evalContext))
+		alertJSON.Set("labels", parseLabels(evalContext, match))
+
+		alerts = append(alerts, alertJSON)
+	}
 
 	// Alertmanager requires a JsonArray
-	bodyJSON := simplejson.NewFromAny([]*simplejson.Json{alertJSON})
+	bodyJSON := simplejson.NewFromAny(alerts)
 	body, _ := bodyJSON.MarshalJSON()
 
 	cmd := &m.SendWebhookSync{
@@ -98,24 +100,24 @@ func parseAnnotations(evalContext *alerting.EvalContext) map[string]string {
 		annotations["description"] = evalContext.Rule.Message
 	}
 
-	formattedMatches := ""
-	for _, evalMatch := range evalContext.EvalMatches {
-		formattedMatches = formattedMatches + evalMatch.Metric + " : " + evalMatch.Value.String() + "\n"
-	}
-	if formattedMatches != "" {
-		annotations["evalMatches"] = formattedMatches
-	}
-
 	return annotations
 }
 
-func parseLabels(rule *alerting.Rule) map[string]string {
+func parseLabels(evalContext *alerting.EvalContext, match *alerting.EvalMatch) map[string]string {
 	labels := make(map[string]string)
-	labels["alertname"] = rule.Name
+	labels["alertname"] = evalContext.Rule.Name
+	labels["metric"] = match.Metric
 
-	if rule.Message != "" {
+	// Parse evalMatch tags
+	for k, v := range match.Tags {
+		labels[k] = v
+	}
+
+	// FIXME: add params in ui for external labels
+	// Parse external labels from message
+	if evalContext.Rule.Message != "" {
 		re := regexp.MustCompile("\"(.+)\":\"(.+)\"")
-		for _, line := range strings.Split(rule.Message, "\n") {
+		for _, line := range strings.Split(evalContext.Rule.Message, "\n") {
 			match := re.FindAllStringSubmatch(line, 1)
 			if match != nil {
 				labelName := match[0][1]

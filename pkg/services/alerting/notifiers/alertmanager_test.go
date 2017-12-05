@@ -51,40 +51,45 @@ func TestAlertmanagerNotifier(t *testing.T) {
 		})
 
 		Convey("Formatting alert notification", func() {
-			Convey("Should correctly parse labels from message", func() {
-				rule := alerting.Rule{
+			Convey("Should correctly parse labels from message and evalMatch", func() {
+				context := alerting.NewEvalContext(context.TODO(), &alerting.Rule{
 					Name: "test_alert",
 					Message: "A great description\n" +
 						"With some details\n" +
 						"\"label1\":\"value1\"\n" +
 						"\"label2\":\"value2\"\n" +
 						"\"label3\":\"value3\"\n",
+				})
+				match := alerting.EvalMatch{
+					Metric: "fake.metric",
+					Tags:   map[string]string{"tag1": "tagvalue1"},
 				}
 				expectedLabels := map[string]string{
 					"alertname": "test_alert",
 					"label1":    "value1",
 					"label2":    "value2",
 					"label3":    "value3",
+					"metric":    "fake.metric",
+					"tag1":      "tagvalue1",
 				}
-				actualLabels := parseLabels(&rule)
+				actualLabels := parseLabels(context, &match)
+				So(len(actualLabels), ShouldEqual, len(expectedLabels))
 				for k, v := range expectedLabels {
 					So(actualLabels[k], ShouldEqual, v)
 				}
 			})
 
-			Convey("Should correctly annotations from evalContext", func() {
+			Convey("Should correctly annotations", func() {
 				context := alerting.NewEvalContext(context.TODO(), &alerting.Rule{
 					Message: "A great description",
 				})
 				context.EvalMatches = append(context.EvalMatches,
 					&alerting.EvalMatch{Value: null.FloatFrom(18.2), Metric: "foobar"})
-				context.EvalMatches = append(context.EvalMatches,
-					&alerting.EvalMatch{Value: null.FloatFrom(42.8), Metric: "lulu"})
 				expectedAnnotations := map[string]string{
 					"description": "A great description",
-					"evalMatches": "foobar : 18.200\nlulu : 42.800\n",
 				}
 				actualAnnotations := parseAnnotations(context)
+				So(len(actualAnnotations), ShouldEqual, len(expectedAnnotations))
 				for k, v := range expectedAnnotations {
 					So(actualAnnotations[k], ShouldEqual, v)
 				}
